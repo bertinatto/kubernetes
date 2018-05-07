@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -245,12 +246,28 @@ func (rc *reconciler) reconcile() {
 
 	rc.attachDesiredVolumes()
 
+	// Update metrics here
+	asw := len(rc.actualStateOfWorld.GetAttachedVolumes())
+	dsw := len(rc.desiredStateOfWorld.GetVolumesToAttach())
+	adControllerMetric.With(prometheus.Labels{"state": "actual_state_of_world"}).Set(float64(asw))
+	adControllerMetric.With(prometheus.Labels{"state": "desired_state_of_world"}).Set(float64(dsw))
+
 	// Update Node Status
 	err := rc.nodeStatusUpdater.UpdateNodeStatuses()
 	if err != nil {
 		glog.Warningf("UpdateNodeStatuses failed with: %v", err)
 	}
 }
+
+func init() {
+	prometheus.MustRegister(adControllerMetric)
+}
+
+var adControllerMetric = prometheus.NewGaugeVec(
+	prometheus.GaugeOpts{
+		Name: "ad_controller_volumes_attached",
+		Help: "Volumes in AD Controoler",
+	}, []string{"state"})
 
 func (rc *reconciler) attachDesiredVolumes() {
 	// Ensure volumes that should be attached are attached.
@@ -272,6 +289,7 @@ func (rc *reconciler) attachDesiredVolumes() {
 			if len(nodes) > 0 {
 				if !volumeToAttach.MultiAttachErrorReported {
 					rc.reportMultiAttachError(volumeToAttach, nodes)
+
 					rc.desiredStateOfWorld.SetMultiAttachError(volumeToAttach.VolumeName, volumeToAttach.NodeName)
 				}
 				continue
