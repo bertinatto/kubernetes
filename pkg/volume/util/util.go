@@ -1028,6 +1028,7 @@ func MapBlockVolume(
 	return nil
 }
 
+// IsCRDInstalled checks if an API resource is supported
 func IsCRDInstalled(name, groupVersion string, client discovery.DiscoveryInterface) (bool, error) {
 	resources, err := client.ServerResourcesForGroupVersion(groupVersion)
 	if err != nil && errors.IsNotFound(err) {
