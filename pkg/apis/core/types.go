@@ -1938,6 +1938,24 @@ type ResourceRequirements struct {
 	Requests ResourceList
 }
 
+// ExecutionHook defines a specific action that should be taken with retries and timeouts
+type ExecutionHook struct {
+	// Command to execute for a particular trigger
+	Handler
+	// How long the controller should try/retry to execute the hook before giving up
+	RetryTimeOutSeconds int64
+	// Number of retries
+	NumRetries int64
+}
+
+// QuiesceUnquiesceHook includes a Quiesce action and an Unquiesce action
+type QuiesceUnquiesceHook struct {
+	// The hook to quiesce the application
+	Quiesce *ExecutionHook
+	// The hook to unquiesce the application
+	Unquiesce *ExecutionHook
+}
+
 // Container represents a single container that is expected to be run on the host.
 type Container struct {
 	// Required: This must be a DNS_LABEL.  Each container in a pod must
@@ -2009,6 +2027,9 @@ type Container struct {
 	StdinOnce bool
 	// +optional
 	TTY bool
+	// Defines the hook to quiesce and unquiesce an application
+	// +optional
+	QuiesceUnquiesceHook *QuiesceUnquiesceHook
 }
 
 // Handler defines a specific action that should be taken
