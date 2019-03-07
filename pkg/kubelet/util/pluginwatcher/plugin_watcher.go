@@ -191,7 +191,12 @@ func (w *Watcher) init() error {
 // Goroutines started here will be waited for in Stop() before cleaning up.
 // Ignore all errors except root dir not being walkable
 func (w *Watcher) traversePluginDir(dir string) error {
-	return w.fs.Walk(dir, func(path string, info os.FileInfo, err error) error {
+	dirsToWatch := []string{}
+	socketsFound := []string{}
+
+	// Traverse the whole dir looking for socket files and dirs to watch for
+	// TODO: if there are too many fields in the dir, this might be a poblem: slow, races
+	if errWalk := w.fs.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if path == dir {
 				return fmt.Errorf("error accessing path: %s error: %v", path, err)
@@ -206,25 +211,36 @@ func (w *Watcher) traversePluginDir(dir string) error {
 			if w.containsBlacklistedDir(path) {
 				return filepath.SkipDir
 			}
-
-			if err := w.fsWatcher.Add(path); err != nil {
-				return fmt.Errorf("failed to watch %s, err: %v", path, err)
-			}
+			dirsToWatch = append(dirsToWatch, path)
 		case mode&os.ModeSocket != 0:
-			w.wg.Add(1)
-			go func() {
-				defer w.wg.Done()
-				w.fsWatcher.Events <- fsnotify.Event{
-					Name: path,
-					Op:   fsnotify.Create,
-				}
-			}()
+			socketsFound = append(socketsFound, path)
 		default:
 			klog.V(5).Infof("Ignoring file %s with mode %v", path, mode)
 		}
 
 		return nil
-	})
+	}); errWalk != nil {
+		return fmt.Errorf("failed traversing plugin directory %q: %v", dir, errWalk)
+	}
+
+	for _, s := range socketsFound {
+		w.fsWatcher.Events <- fsnotify.Event{
+			Name: s,
+			Op:   fsnotify.Create,
+		}
+	}
+
+	// Start watching dirs only after sending the "create" events.
+	// This prevents races when a socket is deleted in one of directories
+	// before and its create event is sent.
+	for _, p := range dirsToWatch {
+		if err := w.fsWatcher.Add(p); err != nil {
+			klog.Errorf("failed to watch %q: %v", p, err)
+		}
+	}
+
+	return nil
+
 }
 
 // Handle filesystem notify event.
