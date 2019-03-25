@@ -27,7 +27,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -298,6 +298,9 @@ func csiHostPathPod(
 					ImagePullPolicy: v1.PullAlways,
 					SecurityContext: &v1.SecurityContext{
 						Privileged: &priv,
+						SELinuxOptions: &v1.SELinuxOptions{
+							Level: "s0:c0,c1",
+						},
 					},
 					Args: []string{
 						"--v=5",

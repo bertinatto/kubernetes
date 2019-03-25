@@ -33,7 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1beta1 "k8s.io/api/rbac/v1beta1"
 	storage "k8s.io/api/storage/v1"
 	storagebeta "k8s.io/api/storage/v1beta1"
@@ -1222,6 +1222,12 @@ func runInPodWithVolume(c clientset.Interface, ns, claimName, nodeName, command 
 					Image:   imageutils.GetE2EImage(imageutils.BusyBox),
 					Command: []string{"/bin/sh"},
 					Args:    []string{"-c", command},
+					SecurityContext: &v1.SecurityContext{
+						SELinuxOptions: &v1.SELinuxOptions{
+							Level: "s0:c0,c1",
+						},
+					},
+
 					VolumeMounts: []v1.VolumeMount{
 						{
 							Name:      "my-volume",
