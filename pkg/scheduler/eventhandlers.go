@@ -18,14 +18,16 @@ package scheduler
 
 import (
 	"fmt"
-	"k8s.io/klog"
 	"reflect"
 
-	"k8s.io/api/core/v1"
+	"k8s.io/klog"
+
+	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	coreinformers "k8s.io/client-go/informers/core/v1"
-	storageinformers "k8s.io/client-go/informers/storage/v1"
+	storageinformersv1 "k8s.io/client-go/informers/storage/v1"
+	storageinformersv1beta1 "k8s.io/client-go/informers/storage/v1beta1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -150,6 +152,16 @@ func (sched *Scheduler) deleteNodeFromCache(obj interface{}) {
 		klog.Errorf("scheduler cache RemoveNode failed: %v", err)
 	}
 }
+
+func (sched *Scheduler) addCSINodeToCache(obj interface{}) {
+}
+
+func (sched *Scheduler) updateCSINodeInCache(oldObj, newObj interface{}) {
+}
+
+func (sched *Scheduler) deleteCSINodeFromCache(obj interface{}) {
+}
+
 func (sched *Scheduler) addPodToSchedulingQueue(obj interface{}) {
 	if err := sched.config.SchedulingQueue.Add(obj.(*v1.Pod)); err != nil {
 		utilruntime.HandleError(fmt.Errorf("unable to queue %T: %v", obj, err))
@@ -324,7 +336,8 @@ func AddAllEventHandlers(
 	pvInformer coreinformers.PersistentVolumeInformer,
 	pvcInformer coreinformers.PersistentVolumeClaimInformer,
 	serviceInformer coreinformers.ServiceInformer,
-	storageClassInformer storageinformers.StorageClassInformer,
+	storageClassInformer storageinformersv1.StorageClassInformer,
+	csiNodeInformer storageinformersv1beta1.CSINodeInformer,
 ) {
 	// scheduled pod cache
 	podInformer.Informer().AddEventHandler(
@@ -382,6 +395,14 @@ func AddAllEventHandlers(
 			AddFunc:    sched.addNodeToCache,
 			UpdateFunc: sched.updateNodeInCache,
 			DeleteFunc: sched.deleteNodeFromCache,
+		},
+	)
+
+	csiNodeInformer.Informer().AddEventHandler(
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    sched.addCSINodeToCache,
+			UpdateFunc: sched.updateCSINodeInCache,
+			DeleteFunc: sched.deleteCSINodeFromCache,
 		},
 	)
 
