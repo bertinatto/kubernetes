@@ -22,12 +22,13 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	priorityutil "k8s.io/kubernetes/pkg/scheduler/algorithm/priorities/util"
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 )
 
 var (
@@ -286,6 +287,14 @@ func (n *NodeInfo) Node() *v1.Node {
 	return n.node
 }
 
+// CSINode returns overall CSI-related information about this node.
+func (n *NodeInfo) CSINode() *storagev1beta1.CSINode {
+	if n == nil {
+		return nil
+	}
+	return n.csiNode
+}
+
 // Pods return all pods scheduled (including assumed to be) on this node.
 func (n *NodeInfo) Pods() []*v1.Pod {
 	if n == nil {
@@ -473,6 +482,17 @@ func (n *NodeInfo) Clone() *NodeInfo {
 // VolumeLimits returns volume limits associated with the node
 func (n *NodeInfo) VolumeLimits() map[v1.ResourceName]int64 {
 	volumeLimits := map[v1.ResourceName]int64{}
+
+	if n.csiNode != nil {
+		for _, driver := range n.csiNode.Spec.Drivers {
+			if driver.Allocatable != nil && driver.Allocatable.Count != nil {
+				// TODO: remove possibility of having a hash in the name
+				k := v1.ResourceName(volumeutil.GetCSIAttachLimitKey(driver.Name))
+				volumeLimits[k] = int64(*driver.Allocatable.Count)
+			}
+		}
+	}
+
 	for k, v := range n.AllocatableResource().ScalarResources {
 		if v1helper.IsAttachableVolumeResourceName(k) {
 			volumeLimits[k] = v
