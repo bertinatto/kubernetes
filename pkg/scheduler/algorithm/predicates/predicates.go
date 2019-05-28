@@ -25,8 +25,9 @@ import (
 
 	"k8s.io/klog"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -37,6 +38,7 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	storagelisters "k8s.io/client-go/listers/storage/v1"
 	volumehelpers "k8s.io/cloud-provider/volume/helpers"
+	csilib "k8s.io/csi-translation-lib"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	"k8s.io/kubernetes/pkg/features"
@@ -414,7 +416,7 @@ func getMaxVolLimitFromEnv() int {
 	return -1
 }
 
-func (c *MaxPDVolumeCountChecker) filterVolumes(volumes []v1.Volume, namespace string, filteredVolumes map[string]bool) error {
+func (c *MaxPDVolumeCountChecker) filterVolumes(nodeInfo *schedulernodeinfo.NodeInfo, volumes []v1.Volume, namespace string, filteredVolumes map[string]bool) error {
 	for i := range volumes {
 		vol := &volumes[i]
 		if id, ok := c.filter.FilterVolume(vol); ok {
@@ -458,6 +460,23 @@ func (c *MaxPDVolumeCountChecker) filterVolumes(volumes []v1.Volume, namespace s
 				continue
 			}
 
+			// If CSINode contains a volume limit for the same underlying volume type,
+			// the CSI predicate will be responsible for checking the volume limits of this pod.
+			if utilfeature.DefaultFeatureGate.Enabled(features.CSIMigration) && csilib.IsPVMigratable(pv) {
+				pluginName, err := csilib.GetInTreePluginNameFromSpec(pv, nil)
+				if err != nil {
+					klog.V(4).Infof("Unable to look up plugin for %s/%s/%s, assuming PV matches predicate when counting limits: %v", namespace, pvcName, pvName, err)
+					filteredVolumes[pvID] = true
+					continue
+				}
+				// TODO: maybe move this up if hitting performance
+				plugins := getPluginsToIgnore(nodeInfo.CSINode())
+				if _, ok := plugins[pluginName]; ok {
+					klog.V(4).Infof("Deferring the volume limits counting for %s/%s/%s to the CSI predicate", namespace, pvcName, pvName)
+					continue
+				}
+			}
+
 			if id, ok := c.filter.FilterPersistentVolume(pv); ok {
 				filteredVolumes[id] = true
 			}
@@ -465,6 +484,25 @@ func (c *MaxPDVolumeCountChecker) filterVolumes(volumes []v1.Volume, namespace s
 	}
 
 	return nil
+}
+
+// getPluginsToIgnore returns a set containing all plugins for which
+// there is a counterpart CSI driver available in the node. The CSI the driver
+// must be both installed in the node and have its volume limits value set.
+func getPluginsToIgnore(csiNode *storagev1beta1.CSINode) map[string]struct{} {
+	plugins := make(map[string]struct{})
+	for _, driver := range csiNode.Spec.Drivers {
+		if driver.Allocatable == nil || driver.Allocatable.Count == nil {
+			continue
+		}
+		pluginName, err := csilib.GetInTreeNameFromCSIName(driver.Name)
+		if err != nil {
+			klog.V(4).Infof("Unable to look up plugin name from driver name: %v", err)
+			continue
+		}
+		plugins[pluginName] = struct{}{}
+	}
+	return plugins
 }
 
 func (c *MaxPDVolumeCountChecker) predicate(pod *v1.Pod, meta PredicateMetadata, nodeInfo *schedulernodeinfo.NodeInfo) (bool, []PredicateFailureReason, error) {
@@ -475,7 +513,7 @@ func (c *MaxPDVolumeCountChecker) predicate(pod *v1.Pod, meta PredicateMetadata,
 	}
 
 	newVolumes := make(map[string]bool)
-	if err := c.filterVolumes(pod.Spec.Volumes, pod.Namespace, newVolumes); err != nil {
+	if err := c.filterVolumes(nodeInfo, pod.Spec.Volumes, pod.Namespace, newVolumes); err != nil {
 		return false, nil, err
 	}
 
@@ -487,7 +525,7 @@ func (c *MaxPDVolumeCountChecker) predicate(pod *v1.Pod, meta PredicateMetadata,
 	// count unique volumes
 	existingVolumes := make(map[string]bool)
 	for _, existingPod := range nodeInfo.Pods() {
-		if err := c.filterVolumes(existingPod.Spec.Volumes, existingPod.Namespace, existingVolumes); err != nil {
+		if err := c.filterVolumes(nodeInfo, existingPod.Spec.Volumes, existingPod.Namespace, existingVolumes); err != nil {
 			return false, nil, err
 		}
 	}
