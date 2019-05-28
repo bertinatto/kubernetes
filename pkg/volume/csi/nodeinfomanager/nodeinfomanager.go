@@ -56,8 +56,6 @@ var (
 		Factor:   5.0,
 		Jitter:   0.1,
 	}
-	attachVolumeLimitEnabled = utilfeature.DefaultFeatureGate.Enabled(features.AttachVolumeLimit)
-	csiNodeInfoEnabled       = utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo)
 )
 
 // nodeInfoManager contains necessary common dependencies to update node info on both
@@ -114,7 +112,7 @@ func (nim *nodeInfoManager) InstallCSIDriver(driverName string, driverNodeID str
 		updateNodeIDInNode(driverName, driverNodeID),
 	}
 
-	if csiNodeInfoEnabled {
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
 		nodeUpdateFuncs = append(nodeUpdateFuncs, updateTopologyLabels(topology))
 	}
 
@@ -123,7 +121,7 @@ func (nim *nodeInfoManager) InstallCSIDriver(driverName string, driverNodeID str
 		return fmt.Errorf("error updating Node object with CSI driver node info: %v", err)
 	}
 
-	if csiNodeInfoEnabled {
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
 		err = nim.updateCSINode(driverName, driverNodeID, maxAttachLimit, topology)
 		if err != nil {
 			return fmt.Errorf("error updating CSINode object with CSI driver node info: %v", err)
@@ -137,7 +135,7 @@ func (nim *nodeInfoManager) InstallCSIDriver(driverName string, driverNodeID str
 // If multiple calls to UninstallCSIDriver() are made in parallel, some calls might receive Node or
 // CSINode update conflicts, which causes the function to retry the corresponding update.
 func (nim *nodeInfoManager) UninstallCSIDriver(driverName string) error {
-	if csiNodeInfoEnabled {
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
 		err := nim.uninstallDriverFromCSINode(driverName)
 		if err != nil {
 			return fmt.Errorf("error uninstalling CSI driver from CSINode object %v", err)
@@ -554,7 +552,7 @@ func (nim *nodeInfoManager) installDriverToCSINode(
 		TopologyKeys: topologyKeys.List(),
 	}
 
-	if attachVolumeLimitEnabled {
+	if utilfeature.DefaultFeatureGate.Enabled(features.AttachVolumeLimit) {
 		if maxAttachLimit > 0 {
 			if maxAttachLimit > math.MaxInt32 {
 				klog.Warningf("Exceeded max supported attach limit value, truncating it to %d", math.MaxInt32)

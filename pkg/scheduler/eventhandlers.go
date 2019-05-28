@@ -26,10 +26,12 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	storagev1beta1 "k8s.io/api/storage/v1beta1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	coreinformers "k8s.io/client-go/informers/core/v1"
 	storageinformersv1 "k8s.io/client-go/informers/storage/v1"
 	storageinformersv1beta1 "k8s.io/client-go/informers/storage/v1beta1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/kubernetes/pkg/features"
 )
 
 func (sched *Scheduler) onPvAdd(obj interface{}) {
@@ -449,13 +451,15 @@ func AddAllEventHandlers(
 		},
 	)
 
-	csiNodeInformer.Informer().AddEventHandler(
-		cache.ResourceEventHandlerFuncs{
-			AddFunc:    sched.addCSINodeToCache,
-			UpdateFunc: sched.updateCSINodeInCache,
-			DeleteFunc: sched.deleteCSINodeFromCache,
-		},
-	)
+	if utilfeature.DefaultFeatureGate.Enabled(features.CSINodeInfo) {
+		csiNodeInformer.Informer().AddEventHandler(
+			cache.ResourceEventHandlerFuncs{
+				AddFunc:    sched.addCSINodeToCache,
+				UpdateFunc: sched.updateCSINodeInCache,
+				DeleteFunc: sched.deleteCSINodeFromCache,
+			},
+		)
+	}
 
 	// On add and delete of PVs, it will affect equivalence cache items
 	// related to persistent volume
