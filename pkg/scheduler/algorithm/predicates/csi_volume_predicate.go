@@ -34,9 +34,10 @@ import (
 
 // CSIMaxVolumeLimitChecker defines predicate needed for counting CSI volumes
 type CSIMaxVolumeLimitChecker struct {
-	pvInfo               PersistentVolumeInfo
-	pvcInfo              PersistentVolumeClaimInfo
-	scInfo               StorageClassInfo
+	pvInfo  PersistentVolumeInfo
+	pvcInfo PersistentVolumeClaimInfo
+	scInfo  StorageClassInfo
+
 	randomVolumeIDPrefix string
 }
 
@@ -161,7 +162,6 @@ func (c *CSIMaxVolumeLimitChecker) filterAttachableVolumes(
 		}
 
 		csiNode := nodeInfo.CSINode()
-
 		driverName, volumeHandle := c.getCSIDriver(pvc, csiNode)
 		// if we can't find driver name or volume handle - we don't count this volume.
 		if driverName == "" || volumeHandle == "" {
@@ -211,15 +211,18 @@ func (c *CSIMaxVolumeLimitChecker) getCSIDriver(pvc *v1.PersistentVolumeClaim, c
 			return "", ""
 		}
 
-		driverName, err := csilib.GetCSINameFromInTreeName(pluginName)
+		csiPV, err := csilib.TranslateInTreePVToCSI(pv)
 		if err != nil {
-			klog.V(5).Infof("Unable to get CSI name from in-tree plugin name: %v", err)
+			klog.V(4).Infof("Unable to translate in-tree volume to CSI: %v", err)
 			return "", ""
 		}
 
-		// TODO: get real id from volume
-		pvID := fmt.Sprintf("%s-%s/%s", c.randomVolumeIDPrefix, namespace, pvcName)
-		return driverName, pvID
+		if csiPV.Spec.PersistentVolumeSource.CSI == nil {
+			klog.V(4).Infof("Unable to get a valid volume source for translated PV %s", pvName)
+			return "", ""
+		}
+
+		csiSource = csiPV.Spec.PersistentVolumeSource.CSI
 	}
 
 	return csiSource.Driver, csiSource.VolumeHandle
