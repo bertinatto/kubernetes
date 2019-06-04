@@ -54,17 +54,17 @@ func NewCSIMaxVolumeLimitPredicate(
 func (c *CSIMaxVolumeLimitChecker) attachableLimitPredicate(
 	pod *v1.Pod, meta PredicateMetadata, nodeInfo *schedulernodeinfo.NodeInfo) (bool, []PredicateFailureReason, error) {
 
-	// if feature gate is disable we return
 	if !utilfeature.DefaultFeatureGate.Enabled(features.AttachVolumeLimit) {
 		return true, nil, nil
 	}
+
 	// If a pod doesn't have any volume attached to it, the predicate will always be true.
-	// Thus we make a fast path for it, to avoid unnecessary computations in this case.
+	// Thus we make a fast path for it to avoid unnecessary computations in this case.
 	if len(pod.Spec.Volumes) == 0 {
 		return true, nil, nil
 	}
 
-	// a map of unique volume name/csi volume handle and volume limit key
+	// A map of unique volume name/csi volume handle and volume limit key.
 	newVolumes := make(map[string]string)
 	if err := c.filterAttachableVolumes(nodeInfo, pod.Spec.Volumes, pod.Namespace, newVolumes); err != nil {
 		return false, nil, err
@@ -74,14 +74,7 @@ func (c *CSIMaxVolumeLimitChecker) attachableLimitPredicate(
 		return true, nil, nil
 	}
 
-	nodeVolumeLimits := nodeInfo.VolumeLimits()
-
-	// if node does not have volume limits this predicate should exit
-	if len(nodeVolumeLimits) == 0 {
-		return true, nil, nil
-	}
-
-	// a map of unique volume name/csi volume handle and volume limit key
+	// A map of unique volume name/csi volume handle and volume limit key.
 	attachedVolumes := make(map[string]string)
 	for _, existingPod := range nodeInfo.Pods() {
 		if err := c.filterAttachableVolumes(nodeInfo, existingPod.Spec.Volumes, existingPod.Namespace, attachedVolumes); err != nil {
@@ -89,9 +82,7 @@ func (c *CSIMaxVolumeLimitChecker) attachableLimitPredicate(
 		}
 	}
 
-	newVolumeCount := map[string]int{}
 	attachedVolumeCount := map[string]int{}
-
 	for volumeUniqueName, volumeLimitKey := range attachedVolumes {
 		if _, ok := newVolumes[volumeUniqueName]; ok {
 			delete(newVolumes, volumeUniqueName)
@@ -99,13 +90,20 @@ func (c *CSIMaxVolumeLimitChecker) attachableLimitPredicate(
 		attachedVolumeCount[volumeLimitKey]++
 	}
 
+	newVolumeCount := map[string]int{}
 	for _, volumeLimitKey := range newVolumes {
 		newVolumeCount[volumeLimitKey]++
 	}
 
+	// We don't return early if the node has no limits because we want to
+	// report an error if a CSI driver is not installed in the node.
+	nodeVolumeLimits := nodeInfo.VolumeLimits()
 	for volumeLimitKey, count := range newVolumeCount {
 		maxVolumeLimit, ok := nodeVolumeLimits[v1.ResourceName(volumeLimitKey)]
-		if ok {
+		if !ok {
+			return false, []PredicateFailureReason{ErrNodeMissingCSIDriverInstalled}, nil
+		}
+		if maxVolumeLimit > 0 {
 			currentVolumeCount := attachedVolumeCount[volumeLimitKey]
 			if currentVolumeCount+count > int(maxVolumeLimit) {
 				return false, []PredicateFailureReason{ErrMaxVolumeCountExceeded}, nil
@@ -161,7 +159,7 @@ func (c *CSIMaxVolumeLimitChecker) getCSIDriverInfo(csiNode *storagev1beta1.CSIN
 
 	if pvName == "" {
 		klog.V(5).Infof("Persistent volume had no name for claim %s/%s", namespace, pvcName)
-		return c.getDriverNameFromSC(pvc)
+		return c.getDriverInfoFromSC(csiNode, pvc)
 	}
 
 	pv, err := c.pvInfo.GetPersistentVolumeInfo(pvName)
@@ -170,7 +168,7 @@ func (c *CSIMaxVolumeLimitChecker) getCSIDriverInfo(csiNode *storagev1beta1.CSIN
 		// If we can't fetch PV associated with PVC, may be it got deleted
 		// or PVC was prebound to a PVC that hasn't been created yet.
 		// fallback to using StorageClass for volume counting
-		return c.getDriverNameFromSC(pvc)
+		return c.getDriverInfoFromSC(csiNode, pvc)
 	}
 
 	csiSource := pv.Spec.PersistentVolumeSource.CSI
@@ -208,29 +206,47 @@ func (c *CSIMaxVolumeLimitChecker) getCSIDriverInfo(csiNode *storagev1beta1.CSIN
 	return csiSource.Driver, csiSource.VolumeHandle
 }
 
-func (c *CSIMaxVolumeLimitChecker) getDriverNameFromSC(pvc *v1.PersistentVolumeClaim) (string, string) {
+// getDriverInfoFromSC returns the CSI driver name and a random volume ID of a given PVC's StorageClass.
+func (c *CSIMaxVolumeLimitChecker) getDriverInfoFromSC(csiNode *storagev1beta1.CSINode, pvc *v1.PersistentVolumeClaim) (string, string) {
 	namespace := pvc.Namespace
 	pvcName := pvc.Name
 	scName := pvc.Spec.StorageClassName
 
-	placeHolderCSIDriver := ""
-	placeHolderHandle := ""
+	// If StorageClass is not set or not found, then PVC must be using immediate binding mode
+	// and hence it must be bound before scheduling. So it is safe to not count it.
 	if scName == nil {
-		// if StorageClass is not set or found, then PVC must be using immediate binding mode
-		// and hence it must be bound before scheduling. So it is safe to not count it.
-		klog.V(5).Infof("pvc %s/%s has no storageClass", namespace, pvcName)
-		return placeHolderCSIDriver, placeHolderHandle
+		klog.V(5).Infof("PVC %s/%s has no StorageClass", namespace, pvcName)
+		return "", ""
 	}
 
 	storageClass, err := c.scInfo.GetStorageClassInfo(*scName)
 	if err != nil {
-		klog.V(5).Infof("no storage %s found for pvc %s/%s", *scName, namespace, pvcName)
-		return placeHolderCSIDriver, placeHolderHandle
+		klog.V(5).Infof("No storage %s found for PVC %s/%s", *scName, namespace, pvcName)
+		return "", ""
 	}
 
-	// We use random prefix to avoid conflict with volume-ids. If PVC is bound in the middle
-	// predicate and there is another pod(on same node) that uses same volume then we will overcount
+	provisioner := storageClass.Provisioner
+
+	var driverName string
+	if csilib.IsMigratableIntreePluginByName(provisioner) {
+		if !isCSIMigrationOn(csiNode, provisioner) {
+			klog.V(5).Infof("CSI Migration of plugin %s is not enabled", provisioner)
+			return "", ""
+		}
+		name, err := csilib.GetCSINameFromInTreeName(provisioner)
+		if err != nil {
+			klog.V(5).Infof("Unable to look up driver name from provisioner %s: %v", provisioner, err)
+			return "", ""
+		}
+		driverName = name
+	} else if csilib.IsMigratedCSIDriverByName(provisioner) {
+		driverName = provisioner
+	}
+
+	// We use random prefix to avoid conflict with volume IDs. If PVC is bound during the execution of the
+	// predicate and there is another pod on the same node that uses same volume, then we will overcount
 	// the volume and consider both volumes as different.
 	volumeHandle := fmt.Sprintf("%s-%s/%s", c.randomVolumeIDPrefix, namespace, pvcName)
-	return storageClass.Provisioner, volumeHandle
+
+	return driverName, volumeHandle
 }
