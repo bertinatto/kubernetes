@@ -211,6 +211,26 @@ func TestCSIVolumeCountPredicate(t *testing.T) {
 			},
 		},
 	}
+	unknownCSITwoVolPod := &v1.Pod{
+		Spec: v1.PodSpec{
+			Volumes: []v1.Volume{
+				{
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "csi-unknown-csi-1",
+						},
+					},
+				},
+				{
+					VolumeSource: v1.VolumeSource{
+						PersistentVolumeClaim: &v1.PersistentVolumeClaimVolumeSource{
+							ClaimName: "csi-unknown-csi-2",
+						},
+					},
+				},
+			},
+		},
+	}
 
 	tests := []struct {
 		newPod                *v1.Pod
@@ -444,12 +464,47 @@ func TestCSIVolumeCountPredicate(t *testing.T) {
 			limitSource:      "csinode",
 			test:             "should not count in-tree and count csi volumes if migration is disabled (when scheduling csi volumes)",
 		},
+		// should count unbound PVCs with known provisioner and prevent scheduling if driver unavailable
+		{
+			newPod:                unboundPVCPod2,
+			existingPods:          []*v1.Pod{csiEBSTwoVolPod},
+			filterName:            "csi",
+			maxVols:               2,
+			driverNames:           []string{ebsCSIDriverName},
+			fits:                  false,
+			limitSource:           "no-csi-driver",
+			test:                  "should prevent scheduling of unbound pvcs of known type with unavailable driver",
+			expectedFailureReason: ErrNodeMissingCSIDriverInstalled,
+		},
+		// should not prevent unbound PVCs with unknown provisioner if driver unavailable
+		{
+			newPod:       unboundPVCPod2,
+			existingPods: []*v1.Pod{csiEBSTwoVolPod},
+			filterName:   "csi",
+			maxVols:      2,
+			driverNames:  []string{"unknown-csi", ebsCSIDriverName},
+			fits:         true,
+			limitSource:  "no-csi-driver",
+			test:         "should not prevent scheduling of unbound pvcs with unknown provisioner",
+		},
+		// should count unbound PVCs with unknown provisioner and prevent scheduling if over the limit
+		{
+			newPod:       unboundPVCPod2,
+			existingPods: []*v1.Pod{unknownCSITwoVolPod},
+			filterName:   "csi",
+			maxVols:      2,
+			driverNames:  []string{"unknown-csi", ebsCSIDriverName},
+			fits:         false,
+			limitSource:  "csinode",
+			test:         "should count unbound PVCs with unknown provisioner and prevent scheduling",
+		},
 	}
 
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.AttachVolumeLimit, true)()
 	// running attachable predicate tests with feature gate and limit present on nodes
 	for _, test := range tests {
 		t.Run(test.test, func(t *testing.T) {
+
 			node := getNodeWithPodAndVolumeLimits(test.limitSource, test.existingPods, int64(test.maxVols), test.driverNames...)
 			if test.migrationEnabled {
 				defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIMigration, true)()
