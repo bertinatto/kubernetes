@@ -41,7 +41,7 @@ import (
 	"strconv"
 
 	"github.com/onsi/ginkgo"
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/sets"
@@ -352,11 +352,13 @@ func InitGcePDCSIDriver() testsuites.TestDriver {
 			),
 			SupportedMountOption: sets.NewString("debug", "nouid32"),
 			Capabilities: map[testsuites.Capability]bool{
-				testsuites.CapPersistence:  true,
-				testsuites.CapFsGroup:      true,
-				testsuites.CapExec:         true,
-				testsuites.CapMultiPODs:    true,
-				testsuites.CapVolumeLimits: true,
+				testsuites.CapPersistence: true,
+				testsuites.CapFsGroup:     true,
+				testsuites.CapExec:        true,
+				testsuites.CapMultiPODs:   true,
+				// GCE supports volume limits, but the test creates large
+				// number of volumes and times out test suites.
+				testsuites.CapVolumeLimits: false,
 			},
 			RequiredAccessModes: []v1.PersistentVolumeAccessMode{v1.ReadWriteOnce},
 		},

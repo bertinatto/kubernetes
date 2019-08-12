@@ -985,10 +985,12 @@ func InitCinderDriver() testsuites.TestDriver {
 				"ext3",
 			),
 			Capabilities: map[testsuites.Capability]bool{
-				testsuites.CapPersistence:  true,
-				testsuites.CapFsGroup:      true,
-				testsuites.CapExec:         true,
-				testsuites.CapVolumeLimits: true,
+				testsuites.CapPersistence: true,
+				testsuites.CapFsGroup:     true,
+				testsuites.CapExec:        true,
+				// Cinder supports volume limits, but the test creates large
+				// number of volumes and times out test suites.
+				testsuites.CapVolumeLimits: false,
 			},
 		},
 	}
@@ -1160,7 +1162,9 @@ func InitGcePdDriver() testsuites.TestDriver {
 				testsuites.CapMultiPODs:           true,
 				testsuites.CapControllerExpansion: true,
 				testsuites.CapNodeExpansion:       true,
-				testsuites.CapVolumeLimits:        true,
+				// GCE supports volume limits, but the test creates large
+				// number of volumes and times out test suites.
+				testsuites.CapVolumeLimits: false,
 			},
 		},
 	}
@@ -1410,12 +1414,14 @@ func InitAzureDriver() testsuites.TestDriver {
 				"ext4",
 			),
 			Capabilities: map[testsuites.Capability]bool{
-				testsuites.CapPersistence:  true,
-				testsuites.CapFsGroup:      true,
-				testsuites.CapBlock:        true,
-				testsuites.CapExec:         true,
-				testsuites.CapMultiPODs:    true,
-				testsuites.CapVolumeLimits: true,
+				testsuites.CapPersistence: true,
+				testsuites.CapFsGroup:     true,
+				testsuites.CapBlock:       true,
+				testsuites.CapExec:        true,
+				testsuites.CapMultiPODs:   true,
+				// Azure supports volume limits, but the test creates large
+				// number of volumes and times out test suites.
+				testsuites.CapVolumeLimits: false,
 			},
 		},
 	}
@@ -1540,7 +1546,9 @@ func InitAwsDriver() testsuites.TestDriver {
 				testsuites.CapMultiPODs:           true,
 				testsuites.CapControllerExpansion: true,
 				testsuites.CapNodeExpansion:       true,
-				testsuites.CapVolumeLimits:        true,
+				// AWS supports volume limits, but the test creates large
+				// number of volumes and times out test suites.
+				testsuites.CapVolumeLimits: false,
 			},
 		},
 	}
