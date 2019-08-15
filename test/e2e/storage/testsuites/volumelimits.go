@@ -31,6 +31,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	migrationplugins "k8s.io/csi-translation-lib/plugins" // volume plugin names are exported nicely there
+	volumeutil "k8s.io/kubernetes/pkg/volume/util"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2elog "k8s.io/kubernetes/test/e2e/framework/log"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
@@ -129,38 +131,10 @@ func (t *volumeLimitsTestSuite) defineTests(driver TestDriver, pattern testpatte
 		e2elog.Logf("Selected node %s", nodeName)
 
 		ginkgo.By("Checking node limits")
-		// Wait in a loop, the driver might just have been installed and kubelet takes a while to publish everything.
-		var limit int
-		err := wait.PollImmediate(2*time.Second, csiNodeInfoTimeout, func() (bool, error) {
-			csiNode, err := l.cs.StorageV1beta1().CSINodes().Get(nodeName, metav1.GetOptions{})
-			if err != nil {
-				e2elog.Logf("%s", err)
-				return false, nil
-			}
-			var csiDriver *storagev1beta1.CSINodeDriver
-			for _, c := range csiNode.Spec.Drivers {
-				if c.Name == driverInfo.Name {
-					csiDriver = &c
-					break
-				}
-			}
-			if csiDriver == nil {
-				e2elog.Logf("CSINodeInfo does not have driver %s yet", driverInfo.Name)
-				return false, nil
-			}
-			if csiDriver.Allocatable == nil {
-				return false, fmt.Errorf("CSINodeInfo does not have Allocatable for driver %s", driverInfo.Name)
-			}
-			if csiDriver.Allocatable.Count == nil {
-				return false, fmt.Errorf("CSINodeInfo does not have Allocatable.Count for driver %s", driverInfo.Name)
-			}
-			limit = int(*csiDriver.Allocatable.Count)
-			return true, nil
-		})
-		framework.ExpectNoError(err, "CSI driver should publish CSINodeInfo with limits for a node")
+		limit, err := getNodeLimits(l.cs, nodeName, driverInfo)
+		framework.ExpectNoError(err)
 
 		e2elog.Logf("Node %s can handle %d volumes of driver %s", nodeName, limit, driverInfo.Name)
-
 		// Create a storage class and generate a PVC. Do not instantiate the PVC yet, keep it for the last pod.
 		l.resource = createGenericVolumeTestResource(driver, l.config, pattern)
 		defer l.resource.cleanupResource()
@@ -292,4 +266,70 @@ func (t *volumeLimitsTestSuite) defineTests(driver TestDriver, pattern testpatte
 		})
 		framework.ExpectNoError(err)
 	})
+}
+
+func getNodeLimits(cs clientset.Interface, nodeName string, driverInfo *DriverInfo) (int, error) {
+	if len(driverInfo.InTreePluginName) == 0 {
+		return getCSINodeLimits(cs, nodeName, driverInfo)
+	}
+	return getInTreeNodeLimits(cs, nodeName, driverInfo)
+}
+
+func getInTreeNodeLimits(cs clientset.Interface, nodeName string, driverInfo *DriverInfo) (int, error) {
+	node, err := cs.CoreV1().Nodes().Get(nodeName, metav1.GetOptions{})
+	if err != nil {
+		return 0, err
+	}
+
+	var allocatableKey string
+	switch driverInfo.InTreePluginName {
+	case migrationplugins.AWSEBSInTreePluginName:
+		allocatableKey = volumeutil.EBSVolumeLimitKey
+	case migrationplugins.GCEPDInTreePluginName:
+		allocatableKey = volumeutil.GCEVolumeLimitKey
+	case migrationplugins.CinderInTreePluginName:
+		allocatableKey = volumeutil.CinderVolumeLimitKey
+	case migrationplugins.AzureDiskInTreePluginName:
+		allocatableKey = volumeutil.AzureVolumeLimitKey
+	default:
+		return 0, fmt.Errorf("Unknown in-tree volume plugin name: %s", driverInfo.InTreePluginName)
+	}
+
+	limit, ok := node.Status.Allocatable[v1.ResourceName(allocatableKey)]
+	if !ok {
+		return 0, fmt.Errorf("Node %s does not contain status.allocatable[%s] for volume plugin %s", nodeName, allocatableKey, driverInfo.InTreePluginName)
+	}
+	return int(limit.Value()), nil
+}
+
+func getCSINodeLimits(cs clientset.Interface, nodeName string, driverInfo *DriverInfo) (int, error) {
+	// Wait in a loop, the driver might just have been installed and kubelet takes a while to publish everything.
+	var limit int
+	err := wait.PollImmediate(2*time.Second, csiNodeInfoTimeout, func() (bool, error) {
+		csiNode, err := cs.StorageV1beta1().CSINodes().Get(nodeName, metav1.GetOptions{})
+		if err != nil {
+			e2elog.Logf("%s", err)
+			return false, nil
+		}
+		var csiDriver *storagev1beta1.CSINodeDriver
+		for _, c := range csiNode.Spec.Drivers {
+			if c.Name == driverInfo.Name {
+				csiDriver = &c
+				break
+			}
+		}
+		if csiDriver == nil {
+			e2elog.Logf("CSINodeInfo does not have driver %s yet", driverInfo.Name)
+			return false, nil
+		}
+		if csiDriver.Allocatable == nil {
+			return false, fmt.Errorf("CSINodeInfo does not have Allocatable for driver %s", driverInfo.Name)
+		}
+		if csiDriver.Allocatable.Count == nil {
+			return false, fmt.Errorf("CSINodeInfo does not have Allocatable.Count for driver %s", driverInfo.Name)
+		}
+		limit = int(*csiDriver.Allocatable.Count)
+		return true, nil
+	})
+	return limit, err
 }
