@@ -148,6 +148,7 @@ const (
 	CapRWX                 Capability = "RWX"                 // support ReadWriteMany access modes
 	CapControllerExpansion Capability = "controllerExpansion" // support volume expansion for controller
 	CapNodeExpansion       Capability = "nodeExpansion"       // support volume expansion for node
+	CapVolumeLimits                   = "volumeLimits"        // support volume limits (applicable only to CSI drivers)
 )
 
 // DriverInfo represents static information about a TestDriver.
