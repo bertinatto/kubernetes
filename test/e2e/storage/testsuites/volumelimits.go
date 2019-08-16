@@ -139,54 +139,8 @@ func (t *volumeLimitsTestSuite) defineTests(driver TestDriver, pattern testpatte
 		l.resource = createGenericVolumeTestResource(driver, l.config, pattern)
 		defer l.resource.cleanupResource()
 
-		// Prepare cleanup
 		defer func() {
-			var cleanupErrors []string
-			err := l.cs.CoreV1().Pods(l.ns.Name).Delete(l.runningPod.Name, nil)
-			if err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete pod %s: %s", l.runningPod.Name, err))
-			}
-			err = l.cs.CoreV1().Pods(l.ns.Name).Delete(l.unschedulablePod.Name, nil)
-			if err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete pod %s: %s", l.unschedulablePod.Name, err))
-			}
-			framework.ExpectNoError(err, "failed cleaning up the unschedulable pod")
-			for _, pvc := range l.pvcs {
-				err = l.cs.CoreV1().PersistentVolumeClaims(l.ns.Name).Delete(pvc.Name, nil)
-				if err != nil {
-					cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete PVC %s: %s", pvc.Name, err))
-				}
-			}
-
-			// Wait for the PVs to be deleted. It includes also pod and PVC deletion because of PVC protection.
-			// We use PVs to make sure that the test does not leave orphan PVs when a CSI driver is destroyed
-			// just after the test ends.
-			err = wait.Poll(5*time.Second, testSlowMultiplier*framework.PVDeletingTimeout, func() (bool, error) {
-				existing := 0
-				for _, pvName := range l.pvNames.List() {
-					_, err = l.cs.CoreV1().PersistentVolumes().Get(pvName, metav1.GetOptions{})
-					if err == nil {
-						existing++
-					} else {
-						if errors.IsNotFound(err) {
-							l.pvNames.Delete(pvName)
-						} else {
-							e2elog.Logf("Failed to get PV %s: %s", pvName, err)
-						}
-					}
-				}
-				if existing > 0 {
-					e2elog.Logf("Waiting for %d PVs to be deleted", existing)
-					return false, nil
-				}
-				return true, nil
-			})
-			if err != nil {
-				cleanupErrors = append(cleanupErrors, fmt.Sprintf("timed out waiting for PVs to be deleted: %s", err))
-			}
-			if len(cleanupErrors) != 0 {
-				framework.ExpectNoError(fmt.Errorf("test cleanup failed: " + strings.Join(cleanupErrors, "; ")))
-			}
+			cleanupTest(l.cs, l.ns.Name, l.runningPod.Name, l.unschedulablePod.Name, l.pvcs, l.pvNames)
 		}()
 
 		// Create <limit> PVCs for one gigantic pod.
@@ -211,27 +165,8 @@ func (t *volumeLimitsTestSuite) defineTests(driver TestDriver, pattern testpatte
 		l.runningPod, err = l.cs.CoreV1().Pods(l.ns.Name).Create(pod)
 		framework.ExpectNoError(err)
 
-		l.pvNames = sets.NewString()
 		ginkgo.By("Waiting for all PVCs to get Bound")
-		err = wait.Poll(5*time.Second, testSlowMultiplier*framework.PVBindingTimeout, func() (bool, error) {
-			unbound := 0
-			for _, pvc := range l.pvcs {
-				pvc, err := l.cs.CoreV1().PersistentVolumeClaims(l.ns.Name).Get(pvc.Name, metav1.GetOptions{})
-				if err != nil {
-					return false, err
-				}
-				if pvc.Status.Phase != v1.ClaimBound {
-					unbound++
-				} else {
-					l.pvNames.Insert(pvc.Spec.VolumeName)
-				}
-			}
-			if unbound > 0 {
-				e2elog.Logf("%d/%d of PVCs are Bound", l.pvNames.Len(), limit)
-				return false, nil
-			}
-			return true, nil
-		})
+		l.pvNames, err = waitForAllPVCsPhase(l.cs, testSlowMultiplier*framework.PVBindingTimeout, l.pvcs)
 		framework.ExpectNoError(err)
 
 		e2elog.Logf("All volumes are bound")
@@ -246,26 +181,99 @@ func (t *volumeLimitsTestSuite) defineTests(driver TestDriver, pattern testpatte
 		pod.Spec.Affinity = selection.Affinity
 		l.unschedulablePod, err = l.cs.CoreV1().Pods(l.ns.Name).Create(pod)
 
-		ginkgo.By("Waiting for the pod to get unschedulable")
-		err = wait.Poll(5*time.Second, framework.PodStartTimeout, func() (bool, error) {
-			p, err := l.cs.CoreV1().Pods(l.ns.Name).Get(l.unschedulablePod.Name, metav1.GetOptions{})
-			if err != nil {
-				return false, fmt.Errorf("failed to get pod %s", pod.Name)
-			}
-			if p.Status.Phase == v1.PodRunning {
-				return false, fmt.Errorf("Node can handle more than %d volumes", limit)
-			}
-			conditions := p.Status.Conditions
-			for _, condition := range conditions {
-				matched, _ := regexp.MatchString("max.+volume.+count", condition.Message)
-				if condition.Reason == v1.PodReasonUnschedulable && matched {
-					return true, nil
+		ginkgo.By("Waiting for the pod to get unschedulable with the right message")
+		err = e2epod.WaitForPodCondition(l.cs, l.ns.Name, l.unschedulablePod.Name, "Unschedulable", framework.PodStartTimeout, func(pod *v1.Pod) (bool, error) {
+			if pod.Status.Phase == v1.PodPending {
+				for _, cond := range pod.Status.Conditions {
+					matched, _ := regexp.MatchString("max.+volume.+count", cond.Message)
+					if cond.Type == v1.PodScheduled && cond.Status == v1.ConditionFalse && cond.Reason == "Unschedulable" && matched {
+						return true, nil
+					}
 				}
+			}
+			if pod.Status.Phase != v1.PodPending {
+				return true, fmt.Errorf("Expected pod to be in phase Pending, but got phase: %v", pod.Status.Phase)
 			}
 			return false, nil
 		})
 		framework.ExpectNoError(err)
 	})
+}
+
+func cleanupTest(cs clientset.Interface, ns string, runningPodName, unschedulablePodName string, pvcs []*v1.PersistentVolumeClaim, pvNames sets.String) error {
+	var cleanupErrors []string
+	if runningPodName != "" {
+		err := cs.CoreV1().Pods(ns).Delete(runningPodName, nil)
+		if err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete pod %s: %s", runningPodName, err))
+		}
+	}
+	if unschedulablePodName != "" {
+		err := cs.CoreV1().Pods(ns).Delete(unschedulablePodName, nil)
+		if err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete pod %s: %s", unschedulablePodName, err))
+		}
+	}
+	for _, pvc := range pvcs {
+		err := cs.CoreV1().PersistentVolumeClaims(ns).Delete(pvc.Name, nil)
+		if err != nil {
+			cleanupErrors = append(cleanupErrors, fmt.Sprintf("failed to delete PVC %s: %s", pvc.Name, err))
+		}
+	}
+	// Wait for the PVs to be deleted. It includes also pod and PVC deletion because of PVC protection.
+	// We use PVs to make sure that the test does not leave orphan PVs when a CSI driver is destroyed
+	// just after the test ends.
+	err := wait.Poll(5*time.Second, testSlowMultiplier*framework.PVDeletingTimeout, func() (bool, error) {
+		existing := 0
+		for _, pvName := range pvNames.UnsortedList() {
+			_, err := cs.CoreV1().PersistentVolumes().Get(pvName, metav1.GetOptions{})
+			if err == nil {
+				existing++
+			} else {
+				if errors.IsNotFound(err) {
+					pvNames.Delete(pvName)
+				} else {
+					e2elog.Logf("Failed to get PV %s: %s", pvName, err)
+				}
+			}
+		}
+		if existing > 0 {
+			e2elog.Logf("Waiting for %d PVs to be deleted", existing)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		cleanupErrors = append(cleanupErrors, fmt.Sprintf("timed out waiting for PVs to be deleted: %s", err))
+	}
+	if len(cleanupErrors) != 0 {
+		return fmt.Errorf("test cleanup failed: " + strings.Join(cleanupErrors, "; "))
+	}
+	return nil
+}
+
+func waitForAllPVCsPhase(cs clientset.Interface, timeout time.Duration, pvcs []*v1.PersistentVolumeClaim) (sets.String, error) {
+	pvNames := sets.NewString()
+	err := wait.Poll(5*time.Second, timeout, func() (bool, error) {
+		unbound := 0
+		for _, pvc := range pvcs {
+			pvc, err := cs.CoreV1().PersistentVolumeClaims(pvc.Namespace).Get(pvc.Name, metav1.GetOptions{})
+			if err != nil {
+				return false, err
+			}
+			if pvc.Status.Phase != v1.ClaimBound {
+				unbound++
+			} else {
+				pvNames.Insert(pvc.Spec.VolumeName)
+			}
+		}
+		if unbound > 0 {
+			e2elog.Logf("%d/%d of PVCs are Bound", pvNames.Len(), len(pvcs))
+			return false, nil
+		}
+		return true, nil
+	})
+	return pvNames, err
 }
 
 func getNodeLimits(cs clientset.Interface, nodeName string, driverInfo *DriverInfo) (int, error) {
