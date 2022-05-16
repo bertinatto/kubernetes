@@ -239,6 +239,7 @@ const (
 	// owner: @gnufied, @verult
 	// alpha: v1.22
 	// beta: v1.23
+	// GA: v1.25
 	// If supported by the CSI driver, delegates the role of applying FSGroup to
 	// the driver by passing FSGroup through the NodeStageVolume and
 	// NodePublishVolume calls.
@@ -878,7 +879,7 @@ var defaultKubernetesFeatureGates = map[featuregate.Feature]featuregate.FeatureS
 
 	DefaultPodTopologySpread: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.26
 
-	DelegateFSGroupToCSIDriver: {Default: true, PreRelease: featuregate.Beta},
+	DelegateFSGroupToCSIDriver: {Default: true, PreRelease: featuregate.GA, LockToDefault: true}, // remove in 1.27
 
 	DevicePlugins: {Default: true, PreRelease: featuregate.Beta},
 

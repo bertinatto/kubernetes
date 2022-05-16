@@ -1095,8 +1095,6 @@ func TestAttacherGetDeviceMountPath(t *testing.T) {
 }
 
 func TestAttacherMountDevice(t *testing.T) {
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DelegateFSGroupToCSIDriver, true)()
-
 	pvName := "test-pv"
 	var testFSGroup int64 = 3000
 	nonFinalError := volumetypes.NewUncertainProgressError("")
@@ -1283,8 +1281,6 @@ func TestAttacherMountDevice(t *testing.T) {
 		t.Run(tc.testName, func(t *testing.T) {
 			t.Logf("Running test case: %s", tc.testName)
 
-			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DelegateFSGroupToCSIDriver, tc.delegateFSGroupFeatureGate)()
-
 			// Setup
 			// Create a new attacher
 			fakeClient := fakeclient.NewSimpleClientset()
@@ -1415,7 +1411,6 @@ func TestAttacherMountDevice(t *testing.T) {
 
 func TestAttacherMountDeviceWithInline(t *testing.T) {
 	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.CSIInlineVolume, true)()
-	defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DelegateFSGroupToCSIDriver, true)()
 	pvName := "test-pv"
 	var testFSGroup int64 = 3000
 	testCases := []struct {
