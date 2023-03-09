@@ -75,6 +75,7 @@ const (
 	defaultPodExecTimeout = 60 * time.Second
 )
 
+// fjb: here is the exec command
 func NewCmdExec(f cmdutil.Factory, streams genericclioptions.IOStreams) *cobra.Command {
 	options := &ExecOptions{
 		StreamOptions: StreamOptions{
@@ -285,6 +286,7 @@ func (o *StreamOptions) SetupTTY() term.TTY {
 	return t
 }
 
+// fjb: this is the func called by the cobra exec command
 // Run executes a validated remote execution against a pod.
 func (p *ExecOptions) Run() error {
 	var err error
@@ -350,6 +352,8 @@ func (p *ExecOptions) Run() error {
 			return err
 		}
 
+		// fjb: and this is the end of the journey in the kubectl exec command.
+		// fjb: subresource exec with the "command" as a "form"?
 		// TODO: consider abstracting into a client invocation or client helper
 		req := restClient.Post().
 			Resource("pods").

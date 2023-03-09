@@ -868,6 +868,7 @@ func (s *Server) getRun(request *restful.Request, response *restful.Response) {
 	}
 
 	// For legacy reasons, run uses different query param than exec.
+	// fjb: consider injecting the cBPF program here
 	params.cmd = strings.Split(request.QueryParameter("cmd"), " ")
 	data, err := s.host.RunInContainer(request.Request.Context(), kubecontainer.GetPodFullName(pod), params.podUID, params.containerName, params.cmd)
 	if err != nil {
