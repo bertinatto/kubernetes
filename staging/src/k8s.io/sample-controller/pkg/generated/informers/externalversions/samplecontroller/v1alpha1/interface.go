@@ -26,6 +26,8 @@ import (
 type Interface interface {
 	// Foos returns a FooInformer.
 	Foos() FooInformer
+	// MyTypes returns a MyTypeInformer.
+	MyTypes() MyTypeInformer
 }
 
 type version struct {
@@ -42,4 +44,9 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 // Foos returns a FooInformer.
 func (v *version) Foos() FooInformer {
 	return &fooInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
+}
+
+// MyTypes returns a MyTypeInformer.
+func (v *version) MyTypes() MyTypeInformer {
+	return &myTypeInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

@@ -29,6 +29,7 @@ import (
 type SamplecontrollerV1alpha1Interface interface {
 	RESTClient() rest.Interface
 	FoosGetter
+	MyTypesGetter
 }
 
 // SamplecontrollerV1alpha1Client is used to interact with features provided by the samplecontroller.k8s.io group.
@@ -38,6 +39,10 @@ type SamplecontrollerV1alpha1Client struct {
 
 func (c *SamplecontrollerV1alpha1Client) Foos(namespace string) FooInterface {
 	return newFoos(c, namespace)
+}
+
+func (c *SamplecontrollerV1alpha1Client) MyTypes(namespace string) MyTypeInterface {
+	return newMyTypes(c, namespace)
 }
 
 // NewForConfig creates a new SamplecontrollerV1alpha1Client for the given config.
