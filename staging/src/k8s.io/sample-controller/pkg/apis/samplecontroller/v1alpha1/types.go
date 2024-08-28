@@ -52,3 +52,17 @@ type FooList struct {
 
 	Items []Foo `json:"items"`
 }
+
+// +genclient
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+type MyType struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	MyEmbeddedType `json:"myEmbeddedType"`
+}
+
+type MyEmbeddedType struct {
+	Namespace string `json:"namespace"`
+}
