@@ -41,8 +41,7 @@ var (
 			`\[Feature:LocalStorageCapacityIsolation\]`, // relies on a separate daemonset?
 			`\[sig-cloud-provider-gcp\]`,                // these test require a different configuration - note that GCE tests from the sig-cluster-lifecycle were moved to the sig-cloud-provider-gcpcluster lifecycle see https://github.com/kubernetes/kubernetes/commit/0b3d50b6dccdc4bbd0b3e411c648b092477d79ac#diff-3b1910d08fb8fd8b32956b5e264f87cb
 
-			`kube-dns-autoscaler`, // Don't run kube-dns
-			`DNS configMap`,       // this tests dns federation configuration via configmap, which we don't support yet
+			`DNS configMap`, // this tests dns federation configuration via configmap, which we don't support yet
 
 			`NodeProblemDetector`, // requires a non-master node to run on
 
@@ -69,7 +68,6 @@ var (
 			"RuntimeClass should reject",
 
 			`Services should implement service.kubernetes.io/headless`,                    // requires SSH access to function, needs to be refactored
-			`ClusterDns \[Feature:Example\] should create pod that uses dns`,              // doesn't use bindata, not part of kube test binary
 			`Simple pod should return command exit codes should handle in-cluster config`, // kubectl cp doesn't work or is not preserving executable bit, we have this test already
 
 			// TODO(node): configure the cri handler for the runtime class to make this work
