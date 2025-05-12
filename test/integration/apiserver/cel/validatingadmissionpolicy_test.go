@@ -55,6 +55,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/generic"
@@ -161,11 +162,12 @@ func Test_ValidateNamespace_NoParams_Success(t *testing.T) {
 	}
 	for i, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := createAndWaitReady(t, client, testcase.policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, testcase.policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -313,11 +315,12 @@ func Test_ValidateNamespace_NoParams_Failures(t *testing.T) {
 	}
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
-			if err := createAndWaitReady(t, client, testcase.policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, testcase.policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -484,13 +487,13 @@ func Test_ValidateAnnotationsAndWarnings(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 
-			if err := createAndWaitReadyNamespacedWithWarnHandler(t, client, withMatchNamespace(testcase.policyBinding, ns), nil, ns, warnHandler); err != nil {
+			if err := createAndWaitReadyNamespacedWithWarnHandler(t, client, withMatchNamespace(testcase.policyBinding, ns), nil, ns, warnHandler, markerName); err != nil {
 				t.Fatal(err)
 			}
 			warnHandler.reset()
@@ -547,12 +550,14 @@ func Test_ValidateNamespace_WithConfigMapParams(t *testing.T) {
 			Expression: "object.metadata.name.endsWith(params.data.namespaceSuffix)",
 		},
 	}, withFailurePolicy(admissionregistrationv1.Fail, withParams(configParamKind(), withNamespaceMatch(makePolicy("validate-namespace-suffix")))))
-	policy := withWaitReadyConstraintAndExpression(valPolicy)
+
+	markerName := rand.String(8)
+	policy := withWaitReadyConstraintAndExpression(valPolicy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -615,7 +620,8 @@ func TestMultiplePolicyBindings(t *testing.T) {
 			Expression: "params.data.autofail != 'true' && (params.data.conditional == 'false' || object.metadata.name.startsWith(params.data.check))",
 		},
 	}
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +633,7 @@ func TestMultiplePolicyBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	autofailBinding := withBindingExistsLabels([]string{"autofail-binding-label"}, policy, makeBinding("autofail-binding", "test-policy", "autofail-params"))
-	if err := createAndWaitReady(t, client, autofailBinding, map[string]string{"paramIdent": "true", "autofail-binding-label": "true"}); err != nil {
+	if err := createAndWaitReady(t, client, autofailBinding, map[string]string{"paramIdent": "true", "autofail-binding-label": "true"}, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -639,7 +645,7 @@ func TestMultiplePolicyBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	autopassBinding := withBindingExistsLabels([]string{"autopass-binding-label"}, policy, makeBinding("autopass-binding", "test-policy", "autopass-params"))
-	if err := createAndWaitReady(t, client, autopassBinding, map[string]string{"paramIdent": "true", "autopass-binding-label": "true"}); err != nil {
+	if err := createAndWaitReady(t, client, autopassBinding, map[string]string{"paramIdent": "true", "autopass-binding-label": "true"}, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -652,7 +658,7 @@ func TestMultiplePolicyBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	condpassBinding := withBindingExistsLabels([]string{"condpass-binding-label"}, policy, makeBinding("condpass-binding", "test-policy", "condpass-params"))
-	if err := createAndWaitReady(t, client, condpassBinding, map[string]string{"paramIdent": "true", "condpass-binding-label": "true"}); err != nil {
+	if err := createAndWaitReady(t, client, condpassBinding, map[string]string{"paramIdent": "true", "condpass-binding-label": "true"}, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -767,8 +773,9 @@ func Test_PolicyExemption(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	markerName := rand.String(8)
 	policyBinding := makeBinding("test-policy-binding", "test-policy", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -848,14 +855,15 @@ func Test_ValidatingAdmissionPolicy_UpdateParamKind(t *testing.T) {
 			Message:    "wrong paramKind",
 		},
 	}, withParams(paramKind, withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	policy, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	allowedPrefixesBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "allowed-prefixes")
-	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -985,7 +993,8 @@ func Test_ValidatingAdmissionPolicy_UpdateParamRef(t *testing.T) {
 			Message:    "wrong paramRef",
 		},
 	}, withParams(configParamKind(), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -994,7 +1003,7 @@ func Test_ValidatingAdmissionPolicy_UpdateParamRef(t *testing.T) {
 	// validate that namespaces starting with "test-1" are allowed
 	// and namespaces starting with "test-2-" are disallowed
 	allowedPrefixesBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "test-1")
-	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1126,7 +1135,8 @@ func Test_ValidatingAdmissionPolicy_UpdateParamResource(t *testing.T) {
 			Message:    "wrong prefix",
 		},
 	}, withParams(configParamKind(), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -1135,7 +1145,7 @@ func Test_ValidatingAdmissionPolicy_UpdateParamResource(t *testing.T) {
 	// validate that namespaces starting with "test-1" are allowed
 	// and namespaces starting with "test-2-" are disallowed
 	allowedPrefixesBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "allowed-prefix")
-	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, allowedPrefixesBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1250,15 +1260,16 @@ func Test_ValidatingAdmissionPolicy_MatchByObjectSelector(t *testing.T) {
 			Message:    "matched by object selector!",
 		},
 	}, withConfigMapMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("match-by-object-selector"))))
+	markerName := rand.String(8)
 	policy = withObjectSelector(labelSelector, policy)
-	policy = withWaitReadyConstraintAndExpression(policy)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	policyBinding := makeBinding("match-by-object-selector-binding", "match-by-object-selector", "")
-	if err := createAndWaitReady(t, client, policyBinding, map[string]string{"foo": "bar"}); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, map[string]string{"foo": "bar"}, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1323,7 +1334,8 @@ func Test_ValidatingAdmissionPolicy_MatchByNamespaceSelector(t *testing.T) {
 		},
 	}, withConfigMapMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("match-by-namespace-selector"))))
 	policy = withNamespaceSelector(labelSelector, policy)
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -1403,14 +1415,15 @@ func Test_ValidatingAdmissionPolicy_MatchByResourceNames(t *testing.T) {
 		},
 	}, withConfigMapMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("match-by-resource-names"))))
 	policy.Spec.MatchConstraints.ResourceRules[0].ResourceNames = []string{"matched-by-resource-name"}
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	policyBinding := makeBinding("match-by-resource-names-binding", "match-by-resource-names", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1554,13 +1567,14 @@ func Test_ValidatingAdmissionPolicy_MatchWithMatchPolicyEquivalent(t *testing.T)
 			},
 		},
 	}
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
 	policyBinding := makeBinding("match-by-match-policy-equivalent-binding", "match-by-match-policy-equivalent", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1647,13 +1661,14 @@ func Test_ValidatingAdmissionPolicy_MatchWithMatchPolicyExact(t *testing.T) {
 			},
 		},
 	}
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
 	policyBinding := makeBinding("match-by-match-policy-exact-binding", "match-by-match-policy-exact", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1739,13 +1754,14 @@ func Test_ValidatingAdmissionPolicy_MatchExcludedResource(t *testing.T) {
 			},
 		},
 	}
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.Background(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("fail to create policy: %v", err)
 	}
 
 	policyBinding := makeBinding("match-by-match-policy-exact-binding", "match-excluded-resources", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatalf("fail to create and wait for binding: %v", err)
 	}
 	r, err := client.AuthenticationV1().SelfSubjectReviews().Create(context.Background(), &authenticationv1.SelfSubjectReview{}, metav1.CreateOptions{})
@@ -1782,7 +1798,8 @@ func Test_ValidatingAdmissionPolicy_PolicyDeletedThenRecreated(t *testing.T) {
 			Message:    "wrong prefix",
 		},
 	}, withParams(configParamKind(), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -1790,7 +1807,7 @@ func Test_ValidatingAdmissionPolicy_PolicyDeletedThenRecreated(t *testing.T) {
 
 	// validate that namespaces starting with "test" are allowed
 	policyBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1899,7 +1916,8 @@ func Test_ValidatingAdmissionPolicy_BindingDeletedThenRecreated(t *testing.T) {
 			Message:    "wrong prefix",
 		},
 	}, withParams(configParamKind(), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -1907,7 +1925,7 @@ func Test_ValidatingAdmissionPolicy_BindingDeletedThenRecreated(t *testing.T) {
 
 	// validate that namespaces starting with "test" are allowed
 	policyBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2027,7 +2045,8 @@ func Test_ValidatingAdmissionPolicy_ParamResourceDeletedThenRecreated(t *testing
 			Message:    "wrong prefix",
 		},
 	}, withParams(configParamKind(), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -2035,7 +2054,7 @@ func Test_ValidatingAdmissionPolicy_ParamResourceDeletedThenRecreated(t *testing
 
 	// validate that namespaces starting with "test" are allowed
 	policyBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "test")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2205,12 +2224,13 @@ func Test_CostLimitForValidation(t *testing.T) {
 	}
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			policyBinding := makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", "")
-			if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -2295,12 +2315,13 @@ func Test_CostLimitForValidationWithFeatureDisabled(t *testing.T) {
 	}
 	for i, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			policyBinding := makeBinding("validate-namespace-suffix-binding", "validate-namespace-suffix", "")
-			if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -2416,14 +2437,15 @@ func TestCRDParams(t *testing.T) {
 
 	for _, testcase := range testcases {
 		t.Run(testcase.name, func(t *testing.T) {
-			policy := withWaitReadyConstraintAndExpression(testcase.policy)
+			markerName := rand.String(8)
+			policy := withWaitReadyConstraintAndExpression(testcase.policy, markerName)
 			if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 				t.Fatal(err)
 			}
 			// remove default namespace since the CRD is cluster-scoped
 			policyBinding := makeBinding("crd-policy-binding", "test-policy", "config-obj")
 			policyBinding.Spec.ParamRef.Namespace = ""
-			if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -2461,13 +2483,14 @@ func TestBindingRemoval(t *testing.T) {
 			Message:    "policy still in effect",
 		},
 	}, withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("test-policy"))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	if _, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 
 	binding := makeBinding("test-binding", "test-policy", "test-params")
-	if err := createAndWaitReady(t, client, binding, nil); err != nil {
+	if err := createAndWaitReady(t, client, binding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 	// check that the policy is active
@@ -2630,17 +2653,18 @@ func Test_ValidateSecondaryAuthorization(t *testing.T) {
 					}
 
 					policyName := fmt.Sprintf("%s-%s-%d", "validate-authz", clientName, i)
+					markerName := rand.String(8)
 					policy := withWaitReadyConstraintAndExpression(withValidations([]admissionregistrationv1.Validation{
 						{
 							Expression: testcase.expression,
 						},
-					}, withFailurePolicy(admissionregistrationv1.Fail, withNamespaceMatch(makePolicy(policyName)))))
+					}, withFailurePolicy(admissionregistrationv1.Fail, withNamespaceMatch(makePolicy(policyName)))), markerName)
 					if _, err := adminClient.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{}); err != nil {
 						t.Fatal(err)
 					}
 					policyBindingName := fmt.Sprintf("%s-%s", policyName, "binding")
 					policyBinding := makeBinding(policyBindingName, policyName, "")
-					if err := createAndWaitReady(t, adminClient, policyBinding, nil); err != nil {
+					if err := createAndWaitReady(t, adminClient, policyBinding, nil, markerName); err != nil {
 						t.Fatal(err)
 					}
 
@@ -2743,7 +2767,8 @@ func TestCRDsOnStartup(t *testing.T) {
 			Message:    "wrong prefix",
 		},
 	}, withParams(withCRDParamKind(crdGVK.Kind, crdGVK.Group, crdGVK.Version), withNamespaceMatch(withFailurePolicy(admissionregistrationv1.Fail, makePolicy("allowed-prefixes")))))
-	policy = withWaitReadyConstraintAndExpression(policy)
+	markerName := rand.String(8)
+	policy = withWaitReadyConstraintAndExpression(policy, markerName)
 	_, err := client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(context.TODO(), policy, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -2751,7 +2776,7 @@ func TestCRDsOnStartup(t *testing.T) {
 
 	// validate that namespaces starting with "test" are allowed
 	policyBinding := makeBinding("allowed-prefixes-binding", "allowed-prefixes", "test")
-	if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+	if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2953,13 +2978,14 @@ contexts:
 				},
 			}
 
-			policy, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, withWaitReadyConstraintAndExpression(policy), metav1.CreateOptions{})
+			markerName := rand.String(8)
+			policy, err = client.AdmissionregistrationV1().ValidatingAdmissionPolicies().Create(ctx, withWaitReadyConstraintAndExpression(policy, markerName), metav1.CreateOptions{})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			policyBinding := makeBinding(policy.Name+"-binding", policy.Name, "")
-			if err := createAndWaitReady(t, client, policyBinding, nil); err != nil {
+			if err := createAndWaitReady(t, client, policyBinding, nil, markerName); err != nil {
 				t.Fatal(err)
 			}
 
@@ -3002,10 +3028,10 @@ func secondaryAuthorizationServiceAccountClient(t *testing.T, adminClient *clien
 	return authutil.ServiceAccountClient("default", "test-service-acct")(t, adminClient, clientConfig, rules)
 }
 
-func withWaitReadyConstraintAndExpression(policy *admissionregistrationv1.ValidatingAdmissionPolicy) *admissionregistrationv1.ValidatingAdmissionPolicy {
+func withWaitReadyConstraintAndExpression(policy *admissionregistrationv1.ValidatingAdmissionPolicy, markerName string) *admissionregistrationv1.ValidatingAdmissionPolicy {
 	policy = policy.DeepCopy()
 	policy.Spec.MatchConstraints.ResourceRules = append(policy.Spec.MatchConstraints.ResourceRules, admissionregistrationv1.NamedRuleWithOperations{
-		ResourceNames: []string{"test-marker"},
+		ResourceNames: []string{markerName},
 		RuleWithOperations: admissionregistrationv1.RuleWithOperations{
 			Operations: []admissionregistrationv1.OperationType{
 				"UPDATE",
@@ -3024,22 +3050,22 @@ func withWaitReadyConstraintAndExpression(policy *admissionregistrationv1.Valida
 		},
 	})
 	policy.Spec.Validations = append([]admissionregistrationv1.Validation{{
-		Expression: "object.metadata.name != 'test-marker'",
+		Expression: fmt.Sprintf("object.metadata.name != '%s'", markerName),
 		Message:    "marker denied; policy is ready",
 	}}, policy.Spec.Validations...)
 	return policy
 }
 
-func createAndWaitReady(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string) error {
-	return createAndWaitReadyNamespaced(t, client, binding, matchLabels, "default")
+func createAndWaitReady(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string, markerName string) error {
+	return createAndWaitReadyNamespaced(t, client, binding, matchLabels, "default", markerName)
 }
 
-func createAndWaitReadyNamespaced(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string, ns string) error {
-	return createAndWaitReadyNamespacedWithWarnHandler(t, client, binding, matchLabels, ns, newWarningHandler())
+func createAndWaitReadyNamespaced(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string, ns string, markerName string) error {
+	return createAndWaitReadyNamespacedWithWarnHandler(t, client, binding, matchLabels, ns, newWarningHandler(), markerName)
 }
 
-func createAndWaitReadyNamespacedWithWarnHandler(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string, ns string, handler *warningHandler) error {
-	marker := &v1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "test-marker", Namespace: ns, Labels: matchLabels}}
+func createAndWaitReadyNamespacedWithWarnHandler(t *testing.T, client clientset.Interface, binding *admissionregistrationv1.ValidatingAdmissionPolicyBinding, matchLabels map[string]string, ns string, handler *warningHandler, markerName string) error {
+	marker := &v1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: markerName, Namespace: ns, Labels: matchLabels}}
 	defer func() {
 		err := client.CoreV1().Endpoints(ns).Delete(context.TODO(), marker.Name, metav1.DeleteOptions{})
 		if err != nil {
